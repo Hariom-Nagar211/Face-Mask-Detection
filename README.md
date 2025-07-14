@@ -100,10 +100,4 @@ Ensure you also have the following files in the root directory:
 
 ---
 
-## 📜 License
-
-This project is released under the [MIT License](LICENSE).
-
----
-
 > Made with ❤️ by Hariom Nagar
