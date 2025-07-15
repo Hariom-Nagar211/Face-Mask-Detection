@@ -1,42 +1,56 @@
 import streamlit as st
 import cv2
 import numpy as np
-from tensorflow.keras.models import load_model
 from PIL import Image
 import os
 import requests
-import streamlit as st
+import tensorflow as tf
 
-MODEL_PATH = "mask_model.h5"
+MODEL_PATH = "mask_model_int8.tflite"
+CASCADE_PATH = "haarcascade_frontalface_default.xml"
 
 # Download model from GitHub release if not present
 def download_model():
     if not os.path.exists(MODEL_PATH):
-        st.warning("📥 Downloading model from GitHub release...")
-        url = "https://github.com/Hariom-Nagar211/Face-Mask-Detection/releases/download/v1.0/mask_model.h5"
+        st.warning("📥 Downloading quantized model...")
+        url = "https://github.com/Hariom-Nagar211/Face-Mask-Detection/releases/download/v2.0/mask_model_int8.tflite"
         with requests.get(url, stream=True) as r:
             r.raise_for_status()
             with open(MODEL_PATH, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-        st.success("✅ Model downloaded successfully!")
+        st.success("✅ Model downloaded!")
 
 download_model()
-model = load_model(MODEL_PATH)
+
+# Load TFLite model
+@st.cache_resource
+def load_model():
+    interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+    interpreter.allocate_tensors()
+    return interpreter
+
+interpreter = load_model()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 # Load Haar Cascade
-haar = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+haar = cv2.CascadeClassifier(CASCADE_PATH)
 if haar.empty():
-    st.error("❌ Failed to load Haar cascade file.")
+    st.error("❌ Haar cascade loading failed.")
     st.stop()
 
 # Predict mask status: 0 = Mask, 1 = No Mask
 def detect_face_mask(img):
     try:
         img_resized = cv2.resize(img, (224, 224))
-        img_norm = img_resized.astype("float32") / 255.0
-        y_pred = model.predict(img_norm.reshape(1, 224, 224, 3))[0][0]
-        return 0 if y_pred <= 0.5 else 1
+        img_input = np.expand_dims(img_resized.astype(np.uint8), axis=0)
+
+        interpreter.set_tensor(input_details[0]['index'], img_input)
+        interpreter.invoke()
+        output = interpreter.get_tensor(output_details[0]['index'])[0][0]
+
+        return 0 if output <= 0.5 else 1
     except Exception as e:
         st.error(f"Prediction failed: {e}")
         return -1
@@ -50,15 +64,9 @@ def draw_label(img, text, pos, bg_color):
     cv2.putText(img, text, (pos[0] + 5, pos[1] - 5),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 1, cv2.LINE_AA)
 
-# Your original face detection function
+# Detect face
 def detect_face(img_gray):
-    faces = haar.detectMultiScale(
-        img_gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(100, 100),
-        flags=cv2.CASCADE_SCALE_IMAGE
-    )
+    faces = haar.detectMultiScale(img_gray, scaleFactor=1.1, minNeighbors=5, minSize=(100, 100), flags=cv2.CASCADE_SCALE_IMAGE)
     return faces
 
 # Process image: detect face, predict mask, draw label
@@ -71,10 +79,6 @@ def process_image(img_bgr):
         return img_bgr
 
     for (x, y, w, h) in faces:
-        x, y = max(0, x), max(0, y)
-        w = min(w, img_bgr.shape[1] - x)
-        h = min(h, img_bgr.shape[0] - y)
-
         face_roi = img_bgr[y:y+h, x:x+w]
         if face_roi.shape[0] < 10 or face_roi.shape[1] < 10:
             continue
