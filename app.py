@@ -3,9 +3,26 @@ import cv2
 import numpy as np
 from tensorflow.keras.models import load_model
 from PIL import Image
+import os
+import requests
+import streamlit as st
 
-# Load model
-model = load_model("mask_model.h5")
+MODEL_PATH = "mask_model.h5"
+
+# Download model from GitHub release if not present
+def download_model():
+    if not os.path.exists(MODEL_PATH):
+        st.warning("📥 Downloading model from GitHub release...")
+        url = "https://github.com/Hariom-Nagar211/Face-Mask-Detection/releases/download/v1.0/mask_model.h5"
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(MODEL_PATH, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        st.success("✅ Model downloaded successfully!")
+
+download_model()
+model = load_model(MODEL_PATH)
 
 # Load Haar Cascade
 haar = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
